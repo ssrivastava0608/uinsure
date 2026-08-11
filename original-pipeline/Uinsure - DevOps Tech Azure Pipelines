@@ -1,0 +1,225 @@
+pool:
+  vmImage: "ubuntu-latest"
+
+stages:
+  # ---------------------------------------------------------------------
+  # BUILD
+  # ---------------------------------------------------------------------
+  - stage: Build
+    displayName: Build, Test & Publish
+    jobs:
+      - job: BuildAndPublish
+        displayName: Build & Publish
+        variables:
+          solution: "**/*.sln"
+          buildConfiguration: Release
+        steps:
+          - task: DotNetCoreCLI@2
+            displayName: "Build"
+            inputs:
+              command: "build"
+              projects: "$(solution)"
+              arguments: "-c $(buildConfiguration)"
+
+          - task: DotNetCoreCLI@2
+            displayName: "Publish WebApp"
+            inputs:
+              command: "publish"
+              publishWebProjects: false
+              projects: "**/Sample.WebApp.csproj"
+              arguments: "--no-build -c $(buildConfiguration) -o $(build.artifactStagingDirectory)/WebApp"
+              zipAfterPublish: true
+
+          - task: PublishPipelineArtifact@1
+            displayName: Publish Artifact WebApp
+            inputs:
+              targetPath: "$(build.artifactStagingDirectory)/WebApp.zip"
+              ArtifactName: "WebApp"
+
+  # ---------------------------------------------------------------------
+  # DEPLOY - QA
+  #
+  # NOTE: everything below this point is intentionally repeated twice
+  # (QA / Prod) with only small differences (variable group, approval
+  # gate before the swap). This is copy-paste on purpose.
+  #
+  # Each stage also has its own copy of the "pick Primary or Secondary
+  # app service" logic, driven by the $(enableDisasterRecoveryDeploy)
+  # pipeline variable - a second, smaller flavour of duplication nested
+  # inside the first.
+  # ---------------------------------------------------------------------
+  - stage: DeployQA
+    displayName: Deploy WebApp QA
+    dependsOn: Build
+    condition: and(succeeded(), ne(variables['Build.Reason'], 'PullRequest'))
+    variables:
+      - group: Sample.WebApp-QA
+    jobs:
+      # Primary* variables point at the resources in the Azure Primary
+      # Region; Secondary* point at the DR resources in the Azure Secondary
+      # Region. Which set gets deployed to is controlled by the
+      # $(enableDisasterRecoveryDeploy) pipeline variable.
+      - job: SetQAVariables
+        displayName: Set QA Deployment Variables
+        steps:
+          - checkout: none #skip checking out the default repository resource
+          - task: PowerShell@2
+            name: Vars
+            inputs:
+              targetType: "inline"
+              script: |
+                if ("$(enableDisasterRecoveryDeploy)" -eq "false") {
+                  Write-Host "##vso[task.setvariable variable=AppServiceName;isOutput=true]$(PrimaryAppServiceName)"
+                  Write-Host "##vso[task.setvariable variable=AppResourceGroup;isOutput=true]$(PrimaryResourceGroup)"
+                } else {
+                  Write-Host "##vso[task.setvariable variable=AppServiceName;isOutput=true]$(SecondaryAppServiceName)"
+                  Write-Host "##vso[task.setvariable variable=AppResourceGroup;isOutput=true]$(SecondaryResourceGroup)"
+                }
+
+      - job: DeployWebApp
+        displayName: Deploy WebApp
+        dependsOn: SetQAVariables
+        variables:
+          AppServiceName: $[ dependencies.SetQAVariables.outputs['Vars.AppServiceName'] ]
+          AppResourceGroup: $[ dependencies.SetQAVariables.outputs['Vars.AppResourceGroup'] ]
+        steps:
+          - task: DownloadPipelineArtifact@2
+            displayName: Download Application Artifact
+            timeoutInMinutes: 15
+            retryCountOnTaskFailure: 1
+            inputs:
+              source: "current"
+              artifact: "WebApp"
+              targetPath: $(Pipeline.Workspace)
+
+          - task: AzureRmWebAppDeployment@4
+            displayName: Deploy Application - Staging Slot
+            timeoutInMinutes: 15
+            retryCountOnTaskFailure: 1
+            inputs:
+              ConnectionType: "AzureRM"
+              azureSubscription: $(AzureServiceConnection)
+              appType: "webApp"
+              WebAppName: $(AppServiceName)
+              deployToSlotOrASE: true
+              SlotName: "staging"
+              ResourceGroupName: $(AppResourceGroup)
+              packageForLinux: "$(Pipeline.Workspace)/**/WebApp.zip"
+              DeploymentType: "zipDeploy"
+
+      - job: SwapSlot
+        displayName: Swap Slot
+        dependsOn:
+          - SetQAVariables
+          - DeployWebApp
+        variables:
+          AppServiceName: $[ dependencies.SetQAVariables.outputs['Vars.AppServiceName'] ]
+          AppResourceGroup: $[ dependencies.SetQAVariables.outputs['Vars.AppResourceGroup'] ]
+        steps:
+          - task: AzureAppServiceManage@0
+            displayName: "Swap Slots"
+            timeoutInMinutes: 15
+            retryCountOnTaskFailure: 1
+            inputs:
+              azureSubscription: $(AzureServiceConnection)
+              Action: "Swap Slots"
+              WebAppName: $(AppServiceName)
+              ResourceGroupName: $(AppResourceGroup)
+              SourceSlot: "staging"
+              SwapWithProduction: true
+
+  # ---------------------------------------------------------------------
+  # DEPLOY - PROD
+  #
+  # Same as QA again, but only runs after QA has succeeded, and adds a
+  # manual approval gate before the slot swap.
+  # ---------------------------------------------------------------------
+  - stage: DeployProd
+    displayName: Deploy WebApp Prod
+    dependsOn: DeployQA
+    condition: and(succeeded(), ne(variables['Build.Reason'], 'PullRequest'))
+    variables:
+      - group: Sample.WebApp-Prod
+    jobs:
+      - job: SetProdVariables
+        displayName: Set Prod Deployment Variables
+        steps:
+          - checkout: none #skip checking out the default repository resource
+          - task: PowerShell@2
+            name: Vars
+            inputs:
+              targetType: "inline"
+              script: |
+                if ("$(enableDisasterRecoveryDeploy)" -eq "false") {
+                  Write-Host "##vso[task.setvariable variable=AppServiceName;isOutput=true]$(PrimaryAppServiceName)"
+                  Write-Host "##vso[task.setvariable variable=AppResourceGroup;isOutput=true]$(PrimaryResourceGroup)"
+                } else {
+                  Write-Host "##vso[task.setvariable variable=AppServiceName;isOutput=true]$(SecondaryAppServiceName)"
+                  Write-Host "##vso[task.setvariable variable=AppResourceGroup;isOutput=true]$(SecondaryResourceGroup)"
+                }
+
+      - job: DeployWebApp
+        displayName: Deploy WebApp
+        dependsOn: SetProdVariables
+        variables:
+          AppServiceName: $[ dependencies.SetProdVariables.outputs['Vars.AppServiceName'] ]
+          AppResourceGroup: $[ dependencies.SetProdVariables.outputs['Vars.AppResourceGroup'] ]
+        steps:
+          - task: DownloadPipelineArtifact@2
+            displayName: Download Application Artifact
+            timeoutInMinutes: 15
+            retryCountOnTaskFailure: 1
+            inputs:
+              source: "current"
+              artifact: "WebApp"
+              targetPath: $(Pipeline.Workspace)
+
+          - task: AzureRmWebAppDeployment@4
+            displayName: Deploy Application - Staging Slot
+            timeoutInMinutes: 15
+            retryCountOnTaskFailure: 1
+            inputs:
+              ConnectionType: "AzureRM"
+              azureSubscription: $(AzureServiceConnection)
+              appType: "webApp"
+              WebAppName: $(AppServiceName)
+              deployToSlotOrASE: true
+              SlotName: "staging"
+              ResourceGroupName: $(AppResourceGroup)
+              packageForLinux: "$(Pipeline.Workspace)/**/WebApp.zip"
+              DeploymentType: "zipDeploy"
+
+      - job: ProdSwapManualValidation
+        displayName: Prod-SlotSwap-Validation
+        pool: server
+        timeoutInMinutes: 4320 # job times out in 3 days
+        dependsOn:
+          - DeployWebApp
+        steps:
+          - task: ManualValidation@0
+            timeoutInMinutes: 1440 # task times out in 1 day
+            inputs:
+              notifyUsers: ""
+              instructions: Please validate the Swap Slot step in Prod.
+
+      - job: SwapSlot
+        displayName: Swap Slot
+        dependsOn:
+          - SetProdVariables
+          - DeployWebApp
+          - ProdSwapManualValidation
+        variables:
+          AppServiceName: $[ dependencies.SetProdVariables.outputs['Vars.AppServiceName'] ]
+          AppResourceGroup: $[ dependencies.SetProdVariables.outputs['Vars.AppResourceGroup'] ]
+        steps:
+          - task: AzureAppServiceManage@0
+            displayName: "Swap Slots"
+            timeoutInMinutes: 15
+            retryCountOnTaskFailure: 1
+            inputs:
+              azureSubscription: $(AzureServiceConnection)
+              Action: "Swap Slots"
+              WebAppName: $(AppServiceName)
+              ResourceGroupName: $(AppResourceGroup)
+              SourceSlot: "staging"
+              SwapWithProduction: true

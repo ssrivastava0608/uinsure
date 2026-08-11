@@ -1,0 +1,49 @@
+parameters:
+  - name: solution
+    type: string
+    default: "**/*.sln"
+  - name: buildConfiguration
+    type: string
+    default: "Release"
+  - name: projectFile
+    type: string
+    default: "**/Sample.WebApp.csproj"
+  - name: artifactName
+    type: string
+    default: "WebApp"
+
+
+stages:
+  # ---------------------------------------------------------------------
+  # BUILD TEMPLATE
+  # ---------------------------------------------------------------------
+  - stage: Build
+    displayName: Build, Test & Publish
+    jobs:
+      - job: BuildAndPublish
+        displayName: Build & Publish
+        variables:
+          solution: ${{ parameters.solution }}
+          buildConfiguration: ${{ parameters.buildConfiguration }}
+        steps:
+          - task: DotNetCoreCLI@2
+            displayName: "Build"
+            inputs:
+              command: "build"
+              projects: ${{ parameters.solution }}
+              arguments: "-c ${{ parameters.buildConfiguration }}
+
+          - task: DotNetCoreCLI@2
+            displayName: "Publish WebApp"
+            inputs:
+              command: "publish"
+              publishWebProjects: false
+              projects: ${{ parameters.projectFile }}
+              arguments: "--no-build -c ${{ parameters.buildConfiguration }} -o $(build.artifactStagingDirectory)/${{ parameters.artifactName }}"
+              zipAfterPublish: true
+
+          - task: PublishPipelineArtifact@1
+            displayName: Publish Artifact WebApp
+            inputs:
+              targetPath: "$(build.artifactStagingDirectory)/${{ parameters.artifactName }}.zip"
+              ArtifactName: ${{ parameters.artifactName }}

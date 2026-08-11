@@ -1,0 +1,30 @@
+trigger: none # this pipeline only runs when triggered by a successful build, not on push
+
+resources:
+  pipelines:
+    - pipeline: buildPipeline # alias used below to reference this resource
+      source: "WebAppBuildPipelineName" # name of the build pipeline in Azure DevOps
+      trigger:
+        branches:
+          include:
+            - main
+            - hotfix/*
+            - release/*
+            - feature/*
+
+pool:
+  vmImage: "ubuntu-latest"
+
+stages:
+  - template: templates/deploy-template.yml
+    parameters:
+      environment: QA
+      requireApproval: false
+
+  - template: templates/deploy-template.yml
+    parameters:
+      environment: Prod
+      dependsOnStage: DeployQA
+      requireApproval: true
+      # only deploy to Prod if the triggering build was run against main or release/*
+      branchCondition: "or(eq(resources.pipeline.buildPipeline.sourceBranch, 'refs/heads/main'), startsWith(resources.pipeline.buildPipeline.sourceBranch, 'refs/heads/release/'))"

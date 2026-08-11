@@ -1,0 +1,20 @@
+trigger: # optional trigger for main/develop/default branch to enable Continous Integration
+  branches:
+    include:
+      - main
+      - hotfix/*
+      - feature/*
+      - release/*
+
+  paths:
+    exclude:
+      - README.md # Ignore changes to README
+      - docs/* # Ignore all files in docs folder
+      - .gitignore # Ignore changes to .gitignore
+      - scripts/local/* # Ignore local scripts
+
+pool:
+  vmImage: "ubuntu-latest" # this can be passed as variable but not needed in this particular case
+
+stages:
+  - template: ./templates/build-template.yml
