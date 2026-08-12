@@ -1,0 +1,24 @@
+Whats good about the pipeline:
+
+- Blue/Green deployment
+- DR using slot swap
+- Manual validation step
+- It works
+
+What has been improved:
+
+- Splitted for build and deployment to make sure they are separate from each other. The artifact can now be build once, and redeployed again and again without the need to build again
+- CI enabled on main/release/feature/hotfix branch
+- CD enabled on successful builds from specific branches which can be removed or the list of branches can be fine-tuned if needed
+- Templates with variables added to make sure code is not re written for each env and same block of codes can now be used for differenet env by assing different variables
+- Added Azure Environments for better access control
+- Triggers added to build pipeline on specific branch but also excluding certain files to avoid fresh builds in case the changes are not in the application source code
+- Added `dotnet test` step to run unit tests and publish results in the build pipeline
+
+What can be improved/changed further:
+
+- SAST, DAST, security scans, integration and further testing should be added as part of build to bring upto industry standards
+- Continous Release can be implemented by removing the approval gates on Prod environments, but only after successful testing and once the system is mature enough with enough access control, security check, SAST, DAST, security, integration testing as part of build, etc
+- More access restriction and protections on the build and deployment pipelines to ensure only specific teams can trigger them manually
+- Healthchecks like a hit to the staging slot returning 200 response can be added as additional part of deployment pipeline beofre the swap to ensure the code is working.
+- Instead of relying solely on branches, build pipeline can create a tag with release version on the code repo, and use the release version on the artefact name and as the buildId. This will ensure in future, even if the branch has moved ahead, someone could deploy or build over an older version of code, for rollbacks or hotfixes.

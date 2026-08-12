@@ -1,0 +1,110 @@
+pool:
+  vmImage: "ubuntu-latest"
+
+parameters:
+  - name: environment
+    type: string
+    values: ["QA", "Prod"]
+  - name: environmentName
+    type: string
+    values: ["Sample-WebApp-QA", "Sample-WebApp-Prod"]
+  - name: enableDisasterRecoveryDeploy
+  - name: dependsOnStage
+    default: ""
+  - name: requireApproval
+    type: boolean
+    default: false
+  - name: slotName
+    type: string
+    default: "staging"
+  - name: artifactName
+    type: string
+    default: "WebApp"
+  - name: branchCondition
+    type: string
+    default: ""
+
+stages:
+  - stage: Deploy${{ parameters.environment }}
+    displayName: Deploy WebApp ${{ parameters.environment }}
+    ${{ if ne(parameters.dependsOnStage, "") }}:
+      dependsOn: ${{ parameters.dependsOnStage }}
+    ${{ if eq(parameters.branchCondition, "") }}:
+      condition: and(succeeded(), ne(variables['Build.Reason'], 'PullRequest'))
+    ${{ else }}:
+      condition: and(succeeded(), ne(variables['Build.Reason'], 'PullRequest'), ${{ parameters.branchCondition }})
+    variables:
+      - group: Sample.WebApp-${{ parameters.environment }}
+    jobs:
+      # Primary* variables point at the resources in the Azure Primary
+      # Region; Secondary* point at the DR resources in the Azure Secondary
+      # Region. Which set gets deployed to is controlled by the
+      # $(enableDisasterRecoveryDeploy) pipeline variable.
+      - job: Set${{ parameters.environment }}Variables
+        displayName: Set ${{ parameters.environment }} Deployment Variables
+        steps:
+          - template: set-deployment-variables.yml
+
+      - deployment: DeployWebApp # changed from job to deployment to use environment resource
+        displayName: Deploy WebApp
+        dependsOn: Set${{ parameters.environment }}Variables
+        environment: ${{ parameters.environmentName }} # Manually need to create this environment in Azure DevOps and link it to the appropriate Azure subscription
+        variables:
+          AppServiceName: $[ dependencies.Set${{ parameters.environment }}Variables.outputs['Vars.AppServiceName'] ]
+          AppResourceGroup: $[ dependencies.Set${{ parameters.environment }}Variables.outputs['Vars.AppResourceGroup'] ]
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: DownloadPipelineArtifact@2
+                  displayName: Download Application Artifact
+                  timeoutInMinutes: 15
+                  retryCountOnTaskFailure: 1
+                  inputs:
+                    source: "specific"
+                    project: "$(System.TeamProject)"
+                    pipeline: "buildPipeline"
+                    artifact: ${{ parameters.artifactName }}
+                    runVersion: "specific"
+                    runId: "$(resources.pipeline.buildPipeline.runId)"
+                    targetPath: $(Pipeline.Workspace)
+
+                - task: AzureRmWebAppDeployment@4
+                  displayName: Deploy Application - Staging Slot
+                  timeoutInMinutes: 15
+                  retryCountOnTaskFailure: 1
+                  inputs:
+                    ConnectionType: "AzureRM"
+                    azureSubscription: $(AzureServiceConnection)
+                    appType: "webApp"
+                    WebAppName: $(AppServiceName)
+                    deployToSlotOrASE: true
+                    SlotName: "${{ parameters.slotName }}"
+                    ResourceGroupName: $(AppResourceGroup)
+                    packageForLinux: "$(Pipeline.Workspace)/**/${{ parameters.artifactName }}.zip"
+                    DeploymentType: "zipDeploy"
+
+      - deployment: SwapSlot
+        displayName: Swap Slot
+        dependsOn:
+          - Set${{ parameters.environment }}Variables
+          - DeployWebApp
+        environment: ${{ parameters.environmentName }}-Swap # Manually need to create this environment in Azure DevOps and link it to the appropriate Azure subscription
+        variables:
+          AppServiceName: $[ dependencies.Set${{ parameters.environment }}Variables.outputs['Vars.AppServiceName'] ]
+          AppResourceGroup: $[ dependencies.Set${{ parameters.environment }}Variables.outputs['Vars.AppResourceGroup'] ]
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: AzureAppServiceManage@0
+                  displayName: "Swap Slots"
+                  timeoutInMinutes: 15
+                  retryCountOnTaskFailure: 1
+                  inputs:
+                    azureSubscription: $(AzureServiceConnection)
+                    Action: "Swap Slots"
+                    WebAppName: $(AppServiceName)
+                    ResourceGroupName: $(AppResourceGroup)
+                    SourceSlot: "${{ parameters.slotName }}"
+                    SwapWithProduction: true

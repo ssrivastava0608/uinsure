@@ -34,6 +34,30 @@ stages:
               arguments: "-c ${{ parameters.buildConfiguration }}
 
           - task: DotNetCoreCLI@2
+            displayName: 'Run Unit Tests'
+            continueOnError: true   # test failures don't fail the build; downstream steps still run
+            inputs:
+              command: 'test'
+              # adjust this glob to match your actual test project naming convention
+              projects: '**/*Tests.csproj'
+              arguments: '--no-build -c $(buildConfiguration) --logger trx --results-directory $(Agent.TempDirectory)/TestResults --collect:"XPlat Code Coverage"'
+ 
+          - task: PublishTestResults@2
+            displayName: 'Publish Test Results'
+            condition: succeededOrFailed()   # publish results even if tests failed, so failures are visible
+            inputs:
+              testResultsFormat: 'VSTest'
+              testResultsFiles: '**/*.trx'
+              searchFolder: '$(Agent.TempDirectory)/TestResults'
+              mergeTestResults: true
+ 
+          - task: PublishCodeCoverageResults@2
+            displayName: 'Publish Code Coverage'
+            condition: succeededOrFailed()
+            inputs:
+              summaryFileLocation: '$(Agent.TempDirectory)/TestResults/**/coverage.cobertura.xml'
+
+          - task: DotNetCoreCLI@2
             displayName: "Publish WebApp"
             inputs:
               command: "publish"
