@@ -9,11 +9,14 @@ parameters:
     type: string
     values: ["Sample-WebApp-QA", "Sample-WebApp-Prod"]
   - name: enableDisasterRecoveryDeploy
+    type: string
+    default: "false"
+    values: ["true", "false"]
   - name: dependsOnStage
     default: ""
-  - name: requireApproval
-    type: boolean
-    default: false
+  # - name: requireApproval This parameter is not needed as the approval gate is now configured in the environment resource in Azure DevOps. The approval gate can be configured to require approval for the Prod environment and not for the QA environment.
+  #   type: boolean
+  #   default: false
   - name: slotName
     type: string
     default: "staging"
@@ -43,7 +46,22 @@ stages:
       - job: Set${{ parameters.environment }}Variables
         displayName: Set ${{ parameters.environment }} Deployment Variables
         steps:
-          - template: set-deployment-variables.yml
+          - checkout: none # skip checking out the default repository resource
+          - task: PowerShell@2
+            name: Vars
+            displayName: "Pick Primary/Secondary deployment target"
+            inputs:
+              targetType: "inline"
+              script: |
+                if ($env:IS_DR_DEPLOY -eq "false") {
+                  Write-Host "##vso[task.setvariable variable=AppServiceName;isOutput=true]$(PrimaryAppServiceName)"
+                  Write-Host "##vso[task.setvariable variable=AppResourceGroup;isOutput=true]$(PrimaryResourceGroup)"
+                } else {
+                  Write-Host "##vso[task.setvariable variable=AppServiceName;isOutput=true]$(SecondaryAppServiceName)"
+                  Write-Host "##vso[task.setvariable variable=AppResourceGroup;isOutput=true]$(SecondaryResourceGroup)"
+                }
+            env:
+              IS_DR_DEPLOY: ${{ parameters.enableDisasterRecoveryDeploy }} # This expands the macro at runtime and injects it safely into the script
 
       - deployment: DeployWebApp # changed from job to deployment to use environment resource
         displayName: Deploy WebApp

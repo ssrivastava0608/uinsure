@@ -20,13 +20,13 @@ stages:
     parameters:
       environment: QA
       environmentName: Sample-WebApp-QA
-      requireApproval: false
+      enableDisasterRecoveryDeploy: $(enableDisasterRecoveryDeploy)
 
   - template: templates/deploy-template.yml
     parameters:
       environment: Prod
       environmentName: Sample-WebApp-Prod
       dependsOnStage: DeployQA
-      requireApproval: true
+      enableDisasterRecoveryDeploy: $(enableDisasterRecoveryDeploy)
       # only deploy to Prod if the triggering build was run against main or release/*
       branchCondition: "or(eq(resources.pipeline.buildPipeline.sourceBranch, 'refs/heads/main'), startsWith(resources.pipeline.buildPipeline.sourceBranch, 'refs/heads/release/'), startsWith(resources.pipeline.buildPipeline.sourceBranch, 'refs/heads/hotfix/'))" # This part is dependant on the branching strategy of the application code repo.

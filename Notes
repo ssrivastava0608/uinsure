@@ -22,3 +22,4 @@ What can be improved/changed further:
 - More access restriction and protections on the build and deployment pipelines to ensure only specific teams can trigger them manually
 - Healthchecks like a hit to the staging slot returning 200 response can be added as additional part of deployment pipeline beofre the swap to ensure the code is working.
 - Instead of relying solely on branches, build pipeline can create a tag with release version on the code repo, and use the release version on the artefact name and as the buildId. This will ensure in future, even if the branch has moved ahead, someone could deploy or build over an older version of code, for rollbacks or hotfixes.
+- enableDisasterRecoveryDeploy variable can be converted to parameters in the main pipeline and split into 2, for QA and Prod
