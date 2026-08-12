@@ -14,10 +14,10 @@ The original brief was a single pipeline with a `Build` stage followed by
 `DeployQA` and `DeployProd` stages. That was split into two pipelines
 connected via an Azure DevOps [pipeline resource](https://learn.microsoft.com/en-us/azure/devops/pipelines/process/resources?view=azure-devops&tabs=schema#define-a-pipelines-resource):
 
-- **`build-pipeline.yml`** builds and publishes the artifact independently
+- **`build.yml`** builds and publishes the artifact independently
   of any deployment target. It can be reused, run on PRs for validation,
   and versioned separately from how/where things get deployed.
-- **`deploy-pipeline.yml`** doesn't build anything itself — it consumes the
+- **`deploy-webapp.yml`** doesn't build anything itself — it consumes the
   artifact from a specific build run (referenced via
   `resources.pipeline.buildPipeline`) and deploys it. This gives a clean
   separation of concerns and means a deploy can be re-run or re-targeted
